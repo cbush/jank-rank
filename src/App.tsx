@@ -1,6 +1,5 @@
 import "./App.css";
-import { useState, useEffect } from "react";
-import { asyncMergeSort } from "./asyncMergeSort";
+import { useMergeSort } from "./useMergeSort";
 import episodes from "./tng-episodes.json";
 
 type Episode = {
@@ -10,62 +9,28 @@ type Episode = {
   summary: string;
 };
 
-type State = {
-  episodes?: Episode[];
-  a?: Episode;
-  b?: Episode;
-  selectA?(): void;
-  selectB?(): void;
-};
+const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  .map((value) => ({ value, sort: Math.random() }))
+  .sort((a, b) => a.sort - b.sort)
+  .map(({ value }) => value);
 
-function useSortEpisodes() {
-  const [state, setState] = useState<State | undefined>(undefined);
-
-  useEffect(() => {
-    let innerReject = (_: Error) => {};
-    asyncMergeSort(episodes, (a, b) => {
-      return new Promise((resolve, reject) => {
-        innerReject = reject;
-        setState({
-          a,
-          b,
-          selectA() {
-            resolve(-1);
-          },
-          selectB() {
-            resolve(1);
-          },
-        });
-      });
-    }).then((sorted) => {
-      setState({
-        episodes: sorted,
-      });
-    });
-    return () => {
-      innerReject(new Error("Tearing down"));
-    };
-  }, [setState]);
-
-  return state;
-}
-
+const subset = episodes.slice(0, 10);
 function App() {
-  const { a, b, selectA, selectB, episodes } = useSortEpisodes() ?? {};
+  const { prompt, result, moreLists, consideredLists, mergedLists } =
+    useMergeSort({
+      array: subset,
+    });
 
-  if (!a || !b) {
+  const { optionA, optionB, selectA, selectB, selectionSoFar } = prompt ?? {};
+  if (result !== undefined) {
     return (
       <>
-        <span>rank, season, episode, title</span>
-        <br />
-        {episodes?.map((e, i) => (
-          <>
-            <span key={e.title}>
-              {i + 1}, {e.s}, {e.e}, {e.title.replaceAll(",", "\\,")}
-            </span>
-            <br />
-          </>
-        ))}
+        <h1>Result</h1>
+        <ol>
+          {result?.map((v, i) => (
+            <li key={i}>{v.title}</li>
+          ))}
+        </ol>
       </>
     );
   }
@@ -74,21 +39,34 @@ function App() {
       <h1>Which is better?</h1>
       <div className="buttons">
         <button onClick={selectA}>
-          <h2>{a.title}</h2>
-          <p>
-            Season {a.s}, episode {a.e}
-          </p>
-          <p>{a.summary}</p>
+          <h2>{optionA?.title}</h2>
         </button>
         <button onClick={selectB}>
-          <h2>{b.title}</h2>
-          <p>
-            Season {b.s}, episode {b.e}
-          </p>
-
-          <p>{b.summary}</p>
+          <h2>{optionB?.title}</h2>
         </button>
       </div>
+      <p>Considered lists</p>
+      <ul>
+        {consideredLists?.map((v, i) => (
+          <li key={i}>{v.map((v) => v.title).join(", ")}</li>
+        ))}
+      </ul>
+
+      <p>More lists</p>
+      <ul>
+        {moreLists.map((v, i) => (
+          <li key={i}>{v.map((v) => v.title).join(", ")}</li>
+        ))}
+      </ul>
+
+      <p>Merged lists</p>
+      <ul>
+        {(selectionSoFar ? [...mergedLists, selectionSoFar] : mergedLists).map(
+          (v, i) => (
+            <li key={i}>{v.map((v) => v.title).join(", ")}</li>
+          )
+        )}
+      </ul>
     </div>
   );
 }

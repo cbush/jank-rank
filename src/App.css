@@ -1,5 +1,4 @@
 .App {
-  text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -11,6 +10,6 @@
 
 button {
   width: 500px;
-  height: 500px;
+  height: 200px;
   margin: 10px;
 }
