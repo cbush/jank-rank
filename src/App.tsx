@@ -1,5 +1,6 @@
 import "./App.css";
-import { useMergeSort } from "./useMergeSort";
+import { useCallback, useEffect, useState } from "react";
+import { useMergeSort, MergeSortState } from "./useMergeSort";
 import episodes from "./tng-episodes.json";
 
 type Episode = {
@@ -15,17 +16,18 @@ const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   .map(({ value }) => value);
 
 const subset = episodes.slice(0, 10);
+
 function App() {
+  const { state, prompt } = useMergeSort({
+    array: subset,
+  });
   const {
-    prompt,
     result,
     moreLists,
     consideredLists,
     mergedLists,
     mergedList: selectionSoFar,
-  } = useMergeSort({
-    array: subset,
-  });
+  } = state;
 
   const { optionA, optionB, selectA, selectB } = prompt ?? {};
   if (result !== undefined) {
