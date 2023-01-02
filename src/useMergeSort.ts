@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import assert from "assert";
 
 export type MergeSorterProps<T> = {
   array: T[];
+  initialState?: MergeSortState<T>;
 };
 
 export type Prompt<T> = {
@@ -10,138 +11,146 @@ export type Prompt<T> = {
   optionB: T;
   selectA(): void;
   selectB(): void;
-  selectionSoFar: T[];
 };
 
 export type MergeSortState<T> = {
-  /** 
-    Whether the merge is complete.
-   */
-  done: boolean;
-
   /**
     The sorted list.
    */
   result?: T[];
 
   /**
-    Lists currently under active consideration.
+    Lists currently under active consideration for merging.
    */
   consideredLists?: [T[], T[]];
 
   /**
-    The rest of the lists.
+    The rest of the lists in the current pass.
    */
   moreLists: T[][];
+
+  /**
+    The lists already merged in the current pass (to be considered in the next
+    pass).
+   */
+  mergedLists: T[][];
+
+  /**
+    The list being formed by merging the current considered lists.
+   */
+  mergedList: T[];
 
   /**
     The current pair for the user to rank and associated info.
    */
   prompt?: Prompt<T>;
-
-  /**
-    The lists already merged in the current pass.
-   */
-  mergedLists: T[][];
 };
 
 // Based on https://github.com/punkave/async-merge-sort/blob/master/index.js
 // Modified to be a React hook that reports state for UI display.
 export function useMergeSort<T>({
   array,
+  initialState,
 }: MergeSorterProps<T>): MergeSortState<T> {
   // The lists of the current pass other than those actively being considered
-  const [moreLists, setMoreLists] = useState<T[][]>([]);
+  const [moreLists, setMoreLists] = useState<T[][]>([
+    ...(initialState?.moreLists ?? []),
+  ]);
 
   // The lists that will be considered on the next pass
-  const [mergedLists, setMergedLists] = useState<T[][]>([]);
+  const [mergedLists, setMergedLists] = useState<T[][]>([
+    ...(initialState?.mergedLists ?? []),
+  ]);
 
   const addMergedList = useCallback(
     (list: T[]) => setMergedLists([...mergedLists, list]),
     [mergedLists]
   );
 
-  const [result, setResult] = useState<T[] | undefined>(undefined);
-
-  const done = result !== undefined;
+  const [result, setResult] = useState<T[] | undefined>(initialState?.result);
 
   // Initialize by creating a list for each element in the input array.
   useEffect(() => {
+    if (initialState !== undefined) {
+      return;
+    }
     if (array.length === 0) {
       // Nothing to sort
       setResult([]);
       return;
     }
+    setResult(undefined);
     const newMoreLists = array.map((v) => [v]);
     setMoreLists(newMoreLists);
-  }, [array]);
+  }, [array, initialState]);
 
   // Select two lists to consider from the list of lists.
   const [consideredLists, setConsideredLists] = useConsideredLists({
-    done,
     moreLists,
     addMergedList,
     setMoreLists,
+    initialState,
   });
 
   // Generate a user prompt so we can determine how to merge the two lists under
   // consideration into one.
-  const prompt = usePrompt({
-    done,
+  const { prompt, mergedList } = useMerger({
     consideredLists,
     setConsideredLists,
     addMergedList,
+    initialState,
   });
 
-  // When all pairs of lists in the current pass have been considered, create a
-  // new list of lists out of the list of merged lists.
+  // Handle the end of a pass, i.e. when all pairs of lists in the current pass
+  // have been considered.
   useEffect(() => {
     if (
-      !done &&
-      moreLists.length === 0 &&
       consideredLists === undefined &&
+      moreLists.length === 0 &&
       mergedLists.length !== 0
     ) {
-      setMoreLists(mergedLists);
+      // End of pass.
+      if (mergedLists.length === 1 && mergedLists[0].length === array.length) {
+        // When all lists have been consolidated into one at the end of a pass, the
+        // sort is complete.
+        setResult(mergedLists[0]);
+        setMoreLists([]);
+      } else {
+        // Continue to next pass Create a new list of lists out of the list of
+        // merged lists.
+        setMoreLists(mergedLists);
+      }
       setMergedLists([]);
     }
-  }, [done, moreLists, mergedLists, consideredLists]);
-
-  // When all lists have been consolidated into one at the end of a pass, the
-  // sort is complete.
-  useEffect(() => {
-    if (moreLists.length === 1 && moreLists[0].length === array.length) {
-      setResult(moreLists[0]);
-    }
-  }, [moreLists, array]);
+  }, [array, moreLists, mergedLists, consideredLists]);
 
   return {
-    done,
-    moreLists,
     consideredLists,
-    result,
-    prompt,
+    moreLists,
     mergedLists,
+    mergedList,
+    prompt,
+    result,
   };
 }
 
-function useConsideredLists<T>({
-  done,
+export function useConsideredLists<T>({
   moreLists,
-  addMergedList,
   setMoreLists,
+  addMergedList,
+  initialState,
 }: {
-  done: boolean;
   moreLists: T[][];
   addMergedList(list: T[]): void;
   setMoreLists(lists: T[][]): void;
+  initialState?: MergeSortState<T>;
 }): [
   [T[], T[]] | undefined,
   (consideredLists: [T[], T[]] | undefined) => void
 ] {
   const [consideredLists, setConsideredLists] = useState<
     [T[], T[]] | undefined
-  >(undefined);
+  >(initialState?.consideredLists);
 
   // Take the next pair of lists to consider
   useEffect(() => {
@@ -152,37 +161,39 @@ function useConsideredLists<T>({
     const [consideredListA, consideredListB, ...newMoreLists] = moreLists;
 
     setMoreLists(newMoreLists);
-    setConsideredLists(
-      consideredListB === undefined
-        ? undefined
-        : [consideredListA, consideredListB]
-    );
 
-    if (consideredListB === undefined) {
-      // Only one list left in pass. Add it to the next pass.
+    if (consideredListB !== undefined) {
+      assert(consideredListA !== undefined);
+      setConsideredLists([consideredListA, consideredListB]);
+    } else {
+      // Only one list left in pass. Send it to the next pass.
       assert(consideredListA !== undefined);
       assert(newMoreLists.length === 0);
       addMergedList(consideredListA);
+      setConsideredLists(undefined);
     }
-  }, [consideredLists, done, moreLists, addMergedList, setMoreLists]);
+  }, [consideredLists, moreLists, addMergedList, setMoreLists]);
 
   return [consideredLists, setConsideredLists];
 }
 
-function usePrompt<T>({
+export function useMerger<T>({
   consideredLists,
   setConsideredLists,
   addMergedList,
+  initialState,
 }: {
-  done: boolean;
   consideredLists: [T[], T[]] | undefined;
   setConsideredLists(consideredLists: [T[], T[]] | undefined): void;
   addMergedList(list: T[]): void;
-}): Prompt<T> | undefined {
+  initialState?: MergeSortState<T>;
+}): { prompt: Prompt<T> | undefined; mergedList: T[] } {
   const [prompt, setPrompt] = useState<Prompt<T> | undefined>(undefined);
 
   // The goal is to create one ("merged") list from two ("considered") lists.
-  const mergedList = useRef<T[]>([]);
+  const [mergedList, setMergedList] = useState<T[]>([
+    ...(initialState?.mergedList ?? []),
+  ]);
 
   useEffect(() => {
     if (prompt !== undefined) {
@@ -200,9 +211,8 @@ function usePrompt<T>({
       setPrompt({
         optionA,
         optionB,
-        selectionSoFar: mergedList.current,
         selectA() {
-          mergedList.current.push(optionA);
+          setMergedList([...mergedList, optionA]);
           const newConsideredLists: [T[], T[]] = [
             [...consideredLists[0]],
             [...consideredLists[1]],
@@ -212,7 +222,7 @@ function usePrompt<T>({
           setPrompt(undefined);
         },
         selectB() {
-          mergedList.current.push(optionB);
+          setMergedList([...mergedList, optionB]);
           const newConsideredLists: [T[], T[]] = [
             [...consideredLists[0]],
             [...consideredLists[1]],
@@ -233,15 +243,14 @@ function usePrompt<T>({
         : optionB !== undefined
         ? consideredLists[1]
         : undefined;
-    const { current } = mergedList;
-    current.push(...(remainingList ?? []));
+    const newMergedList = [...mergedList, ...(remainingList ?? [])];
     // Add the working merged list to the next pass's list of lists.
-    addMergedList(current);
-    mergedList.current = [];
+    addMergedList(newMergedList);
+    setMergedList([]);
 
     // Report that we're done with the current set of lists.
     setConsideredLists(undefined);
-  }, [prompt, consideredLists, setConsideredLists, addMergedList]);
+  }, [prompt, mergedList, consideredLists, setConsideredLists, addMergedList]);
 
-  return prompt;
+  return { prompt, mergedList };
 }

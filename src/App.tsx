@@ -16,12 +16,18 @@ const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 const subset = episodes.slice(0, 10);
 function App() {
-  const { prompt, result, moreLists, consideredLists, mergedLists } =
-    useMergeSort({
-      array: subset,
-    });
+  const {
+    prompt,
+    result,
+    moreLists,
+    consideredLists,
+    mergedLists,
+    mergedList: selectionSoFar,
+  } = useMergeSort({
+    array: subset,
+  });
 
-  const { optionA, optionB, selectA, selectB, selectionSoFar } = prompt ?? {};
+  const { optionA, optionB, selectA, selectB } = prompt ?? {};
   if (result !== undefined) {
     return (
       <>
