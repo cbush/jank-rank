@@ -14,22 +14,34 @@ export type Prompt<T> = {
 };
 
 export type MergeSortState<T> = {
-  // Whether the merge is complete.
+  /** 
+    Whether the merge is complete.
+   */
   done: boolean;
 
-  // The sorted list.
+  /**
+    The sorted list.
+   */
   result?: T[];
 
-  // Lists currently under active consideration.
+  /**
+    Lists currently under active consideration.
+   */
   consideredLists?: [T[], T[]];
 
-  // The rest of the lists.
+  /**
+    The rest of the lists.
+   */
   moreLists: T[][];
 
-  // The current pair under consideration.
+  /**
+    The current pair for the user to rank and associated info.
+   */
   prompt?: Prompt<T>;
 
-  // The lists already merged in the current pass.
+  /**
+    The lists already merged in the current pass.
+   */
   mergedLists: T[][];
 };
 
@@ -53,9 +65,10 @@ export function useMergeSort<T>({
 
   const done = result !== undefined;
 
-  // Initialize when input array given
+  // Initialize by creating a list for each element in the input array.
   useEffect(() => {
     if (array.length === 0) {
+      // Nothing to sort
       setResult([]);
       return;
     }
@@ -63,6 +76,7 @@ export function useMergeSort<T>({
     setMoreLists(newMoreLists);
   }, [array]);
 
+  // Select two lists to consider from the list of lists.
   const [consideredLists, setConsideredLists] = useConsideredLists({
     done,
     moreLists,
@@ -70,6 +84,8 @@ export function useMergeSort<T>({
     setMoreLists,
   });
 
+  // Generate a user prompt so we can determine how to merge the two lists under
+  // consideration into one.
   const prompt = usePrompt({
     done,
     consideredLists,
@@ -77,7 +93,8 @@ export function useMergeSort<T>({
     addMergedList,
   });
 
-  // End of pass
+  // When all pairs of lists in the current pass have been considered, create a
+  // new list of lists out of the list of merged lists.
   useEffect(() => {
     if (
       !done &&
@@ -85,13 +102,13 @@ export function useMergeSort<T>({
       consideredLists === undefined &&
       mergedLists.length !== 0
     ) {
-      console.log("Pass complete");
       setMoreLists(mergedLists);
       setMergedLists([]);
     }
-  }, [done, moreLists, consideredLists]);
+  }, [done, moreLists, mergedLists, consideredLists]);
 
-  // End of sort
+  // When all lists have been consolidated into one at the end of a pass, the
+  // sort is complete.
   useEffect(() => {
     if (moreLists.length === 1 && moreLists[0].length === array.length) {
       setResult(moreLists[0]);
@@ -163,6 +180,8 @@ function usePrompt<T>({
   addMergedList(list: T[]): void;
 }): Prompt<T> | undefined {
   const [prompt, setPrompt] = useState<Prompt<T> | undefined>(undefined);
+
+  // The goal is to create one ("merged") list from two ("considered") lists.
   const mergedList = useRef<T[]>([]);
 
   useEffect(() => {
@@ -172,6 +191,9 @@ function usePrompt<T>({
     if (consideredLists === undefined) {
       return;
     }
+    // Compare the head of each considered list and move the preferred one to
+    // the working merged list. Repeat until one of the considered lists is
+    // empty.
     const optionA = consideredLists[0][0];
     const optionB = consideredLists[1][0];
     if (optionA !== undefined && optionB !== undefined) {
@@ -213,8 +235,11 @@ function usePrompt<T>({
         : undefined;
     const { current } = mergedList;
     current.push(...(remainingList ?? []));
+    // Add the working merged list to the next pass's list of lists.
     addMergedList(current);
     mergedList.current = [];
+
+    // Report that we're done with the current set of lists.
     setConsideredLists(undefined);
   }, [prompt, consideredLists, setConsideredLists, addMergedList]);
 
