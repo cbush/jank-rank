@@ -1,14 +1,21 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import assert from "assert";
+
+export type SelectionHandler<T> = (
+  selection: 0 | 1,
+  state: MergeSortState<T>
+) => void;
 
 export type MergeSortProps<T> = {
   array: T[];
   initialState?: MergeSortState<T>;
+  onSelectionMade?: SelectionHandler<T>;
 };
 
 export type MergeSortPassProps<T> = {
   array: T[];
   state: Omit<MergeSortState<T>, "prompt">;
+  onSelectionMade?: SelectionHandler<T>;
   updateState(state: Partial<MergeSortState<T>>): void;
 };
 
@@ -45,6 +52,11 @@ export type MergeSortState<T> = {
     The list being formed by merging the current considered lists.
    */
   mergedList: T[];
+
+  /**
+    The current pair for the user to rank and associated info.
+   */
+  prompt?: Prompt<T>;
 };
 
 export type MergeSortResult<T> = {
@@ -57,19 +69,66 @@ export type MergeSortResult<T> = {
     The current pair for the user to rank and associated info.
    */
   prompt?: Prompt<T>;
+
+  /**
+    Override the state.
+   */
+  setState(state: MergeSortState<T>): void;
 };
+
+export type UndoableMergeSortResult<T> = MergeSortResult<T> & {
+  /**
+    Action to revert to a previous state or undefined if there is no prior state
+    to return to.
+   */
+  undo?(): void;
+};
+
+export function useUndoableMergeSort<T>({
+  array,
+  initialState,
+  onSelectionMade,
+}: MergeSortProps<T>): UndoableMergeSortResult<T> {
+  const states = useRef<MergeSortState<T>[]>([]);
+  const { state, prompt, setState } = useMergeSort({
+    array,
+    initialState,
+    onSelectionMade(selection, state) {
+      // Store state snapshot
+      states.current.push(state);
+      onSelectionMade && onSelectionMade(selection, state);
+    },
+  });
+
+  const undo = useCallback(() => {
+    const previousState = states.current.pop();
+    if (previousState) {
+      setState({ ...previousState, prompt: undefined });
+    }
+  }, [setState]);
+
+  return {
+    state,
+    setState,
+    prompt,
+    undo: states.current.length > 0 ? undo : undefined,
+  };
+}
 
 // Based on https://github.com/punkave/async-merge-sort/blob/master/index.js
 // Modified to be a React hook that reports state for UI display.
 export function useMergeSort<T>({
   array,
   initialState,
+  onSelectionMade,
 }: MergeSortProps<T>): MergeSortResult<T> {
   const [state, updateState] = useReducer(
-    (oldState: MergeSortState<T>, newState: Partial<MergeSortState<T>>) => ({
-      ...oldState,
-      ...newState,
-    }),
+    (oldState: MergeSortState<T>, newState: Partial<MergeSortState<T>>) => {
+      return {
+        ...oldState,
+        ...newState,
+      };
+    },
     initialState ?? {
       result: undefined,
       consideredLists: undefined,
@@ -79,8 +138,17 @@ export function useMergeSort<T>({
     }
   );
 
+  const setState = useCallback(
+    (state: MergeSortState<T>) => updateState(state),
+    []
+  );
+
   // Initialize by creating a list for each element in the input array.
   useEffect(() => {
+    if (initialState !== undefined) {
+      // Only initialize if not given an initial state
+      return;
+    }
     if (array.length === 0) {
       // Nothing to sort
       updateState({ result: [] });
@@ -88,12 +156,19 @@ export function useMergeSort<T>({
     }
     const newMoreLists = array.map((v) => [v]);
     updateState({ result: undefined, moreLists: newMoreLists });
-  }, [array]);
+  }, [array, initialState]);
 
-  const prompt = useMergeSortPass({ array, state, updateState });
+  useMergeSortPass({
+    array,
+    state,
+    updateState,
+    onSelectionMade,
+  });
+
   return {
     state,
-    prompt,
+    prompt: state.prompt,
+    setState,
   };
 }
 
@@ -101,9 +176,10 @@ export function useMergeSortPass<T>({
   array,
   state,
   updateState,
-}: MergeSortPassProps<T>): Prompt<T> | undefined {
+  onSelectionMade,
+}: MergeSortPassProps<T>): void {
   // The lists of the current pass other than those actively being considered
-  const { moreLists, mergedLists, mergedList } = state;
+  const { moreLists, mergedLists, mergedList, consideredLists } = state;
 
   const addMergedList = useCallback(
     (list: T[]) => updateState({ mergedLists: [...mergedLists, list] }),
@@ -130,21 +206,35 @@ export function useMergeSortPass<T>({
     [updateState]
   );
 
+  const setPrompt = useCallback(
+    (prompt: Prompt<T> | undefined) => updateState({ prompt }),
+    [updateState]
+  );
+
+  const setConsideredLists = useCallback(
+    (consideredLists: [T[], T[]] | undefined) =>
+      updateState({ consideredLists }),
+    [updateState]
+  );
+
   // Select two lists to consider from the list of lists.
-  const [consideredLists, setConsideredLists] = useConsideredLists({
-    moreLists,
+  useConsideredLists({
+    state,
     addMergedList,
+    setConsideredLists,
     setMoreLists,
   });
 
   // Generate a user prompt so we can determine how to merge the two lists under
   // consideration into one.
-  const { prompt } = useMerger({
+  useMerger({
     mergedList,
-    consideredLists,
     setConsideredLists,
     setMergedList,
     addMergedList,
+    onSelectionMade,
+    state,
+    setPrompt,
   });
 
   // Handle the end of a pass, i.e. when all pairs of lists in the current pass
@@ -177,28 +267,20 @@ export function useMergeSortPass<T>({
     setMoreLists,
     setResult,
   ]);
-
-  return prompt;
 }
 
 export function useConsideredLists<T>({
-  moreLists,
+  state,
   setMoreLists,
   addMergedList,
-  initialState,
+  setConsideredLists,
 }: {
-  moreLists: T[][];
+  state: MergeSortState<T>;
   addMergedList(list: T[]): void;
   setMoreLists(lists: T[][]): void;
-  initialState?: MergeSortState<T>;
-}): [
-  [T[], T[]] | undefined,
-  (consideredLists: [T[], T[]] | undefined) => void
-] {
-  const [consideredLists, setConsideredLists] = useState<
-    [T[], T[]] | undefined
-  >(initialState?.consideredLists);
-
+  setConsideredLists(consideredLists: [T[], T[]] | undefined): void;
+}): void {
+  const { moreLists, consideredLists } = state;
   // Take the next pair of lists to consider
   useEffect(() => {
     if (moreLists.length === 0 || consideredLists !== undefined) {
@@ -219,25 +301,33 @@ export function useConsideredLists<T>({
       addMergedList(consideredListA);
       setConsideredLists(undefined);
     }
-  }, [consideredLists, moreLists, addMergedList, setMoreLists]);
-
-  return [consideredLists, setConsideredLists];
+  }, [
+    consideredLists,
+    moreLists,
+    addMergedList,
+    setMoreLists,
+    setConsideredLists,
+  ]);
 }
 
 export function useMerger<T>({
   mergedList,
   setMergedList,
-  consideredLists,
   setConsideredLists,
   addMergedList,
+  onSelectionMade,
+  state,
+  setPrompt,
 }: {
-  consideredLists: [T[], T[]] | undefined;
   setConsideredLists(consideredLists: [T[], T[]] | undefined): void;
   addMergedList(list: T[]): void;
   setMergedList(list: T[]): void;
   mergedList: T[];
-}): { prompt: Prompt<T> | undefined; mergedList: T[] } {
-  const [prompt, setPrompt] = useState<Prompt<T> | undefined>(undefined);
+  onSelectionMade?: SelectionHandler<T>;
+  state: MergeSortState<T>;
+  setPrompt(prompt: Prompt<T> | undefined): void;
+}) {
+  const { consideredLists, prompt } = state;
 
   // The goal is to create one ("merged") list from two ("considered") lists.
   useEffect(() => {
@@ -264,6 +354,7 @@ export function useMerger<T>({
           ];
           newConsideredLists[0].shift();
           setConsideredLists(newConsideredLists);
+          onSelectionMade && onSelectionMade(0, state);
           setPrompt(undefined);
         },
         selectB() {
@@ -274,6 +365,7 @@ export function useMerger<T>({
           ];
           newConsideredLists[1].shift();
           setConsideredLists(newConsideredLists);
+          onSelectionMade && onSelectionMade(1, state);
           setPrompt(undefined);
         },
       });
@@ -302,7 +394,8 @@ export function useMerger<T>({
     consideredLists,
     setConsideredLists,
     addMergedList,
+    onSelectionMade,
+    state,
+    setPrompt,
   ]);
-
-  return { prompt, mergedList };
 }

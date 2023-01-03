@@ -8,7 +8,7 @@ const UseMergeSortTest = function <T extends { toString(): string }>({
   array: T[];
   initialState?: Omit<MergeSortState<T>, "prompt">;
 }) {
-  const { prompt, state } = useMergeSort({ array, initialState });
+  const { state, prompt } = useMergeSort({ array, initialState });
   const { result } = state;
   if (result) {
     return <p>Result: {result.join(", ")}</p>;

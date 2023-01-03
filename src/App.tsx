@@ -1,6 +1,6 @@
 import "./App.css";
 import { useCallback, useEffect, useState } from "react";
-import { useMergeSort, MergeSortState } from "./useMergeSort";
+import { useUndoableMergeSort } from "./useMergeSort";
 import episodes from "./tng-episodes.json";
 
 type Episode = {
@@ -17,8 +17,16 @@ const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 const subset = episodes.slice(0, 10);
 
+function UndoButton({ undo }: { undo?(): void }) {
+  return (
+    <button onClick={undo} disabled={undo === undefined}>
+      Undo
+    </button>
+  );
+}
+
 function App() {
-  const { state, prompt } = useMergeSort({
+  const { state, prompt, undo } = useUndoableMergeSort({
     array: subset,
   });
   const {
@@ -33,6 +41,7 @@ function App() {
   if (result !== undefined) {
     return (
       <>
+        <UndoButton undo={undo} />
         <h1>Result</h1>
         <ol>
           {result?.map((v, i) => (
@@ -44,6 +53,7 @@ function App() {
   }
   return (
     <div className="App">
+      <UndoButton undo={undo} />
       <h1>Which is better?</h1>
       <div className="buttons">
         <button onClick={selectA}>
